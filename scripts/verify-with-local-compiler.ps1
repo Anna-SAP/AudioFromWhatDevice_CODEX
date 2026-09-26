@@ -45,7 +45,7 @@ function Compile-Local([string]$Name, [string[]]$Files, [bool]$Gui) {
 }
 $sources = @(Get-ChildItem (Join-Path $root 'src\AudioFromWhatDevice') -Filter '*.cs' | Select-Object -ExpandProperty FullName)
 Compile-Local 'AudioFromWhatDevice' $sources $true
-Compile-Local 'ActivityTests' @((Join-Path $root 'tests\ActivityTests\Program.cs'), (Join-Path $root 'src\AudioFromWhatDevice\ActivityState.cs'), (Join-Path $root 'src\AudioFromWhatDevice\TrayLabels.cs'), (Join-Path $root 'src\AudioFromWhatDevice\BluetoothDeviceDetector.cs')) $false
+Compile-Local 'ActivityTests' @((Join-Path $root 'tests\ActivityTests\Program.cs'), (Join-Path $root 'src\AudioFromWhatDevice\ActivityState.cs'), (Join-Path $root 'src\AudioFromWhatDevice\TrayLabels.cs'), (Join-Path $root 'src\AudioFromWhatDevice\BluetoothDeviceDetector.cs'), (Join-Path $root 'src\AudioFromWhatDevice\StartupRegistration.cs')) $false
 & dotnet (Join-Path $output 'ActivityTests.dll')
 if ($LASTEXITCODE -ne 0) { throw 'Activity tests failed.' }
 & dotnet (Join-Path $output 'AudioFromWhatDevice.dll') --probe (Join-Path $output 'probe.json')

@@ -1,4 +1,5 @@
 using AudioFromWhatDevice;
+using Microsoft.Win32;
 
 var count = 0;
 void Expect(Activity expected, Activity actual, string scenario)
@@ -144,4 +145,36 @@ var empty = Display(new([], null, DateTimeOffset.Now));
 Check(empty.Text == "—" && empty.Kind == TrayBadgeKind.NoDevices, "No devices produces one neutral status badge");
 Check(Display(connected with { Devices = [unplugged] }).Kind == TrayBadgeKind.NoDevices,
     "Disconnected-only snapshots cannot retain a device badge");
-Console.WriteLine($"PASS: {count} activity, identity, single-tray selection and saved-label checks");
+
+Check(StartupRegistration.Targets("\"C:\\Apps\\Audio.exe\"", @"C:\Apps\Audio.exe"), "Quoted Run command starts this copy");
+Check(StartupRegistration.Targets(@" c:\apps\AUDIO.EXE ", @"C:\Apps\Audio.exe"), "Unquoted Run command matches regardless of case");
+Check(StartupRegistration.Targets("\"C:\\Apps\\Audio.exe\" --tray", @"C:\Apps\Audio.exe"), "Arguments do not change the started copy");
+Check(!StartupRegistration.Targets("\"D:\\Old\\Audio.exe\"", @"C:\Apps\Audio.exe") && !StartupRegistration.Targets(null, @"C:\Apps\Audio.exe"),
+    "A moved copy or a missing entry is not this copy");
+Check(StartupRegistration.IsApproved(null) && StartupRegistration.IsApproved([2, 0, 0, 0]) && StartupRegistration.IsApproved([6, 0, 0, 0]),
+    "Entries not turned off in Task Manager are approved");
+Check(!StartupRegistration.IsApproved([3, 0, 0, 0]) && !StartupRegistration.IsApproved([7, 0, 0, 0]),
+    "Entries turned off in Task Manager are not approved");
+// Exercise the real registry under a throwaway key; the actual Run key is never touched.
+var startupKey = @"Software\AudioFromWhatDevice-startup-test-" + Guid.NewGuid().ToString("N");
+try
+{
+    var registration = new StartupRegistration(@"C:\Apps\Audio.exe", startupKey + @"\Run", startupKey + @"\Approved");
+    Check(!registration.IsEnabled, "Start on boot stays off until chosen");
+    registration.Enable();
+    using (var run = Registry.CurrentUser.OpenSubKey(startupKey + @"\Run"))
+        Check(registration.IsEnabled && run?.GetValue("AudioFromWhatDevice") as string == "\"C:\\Apps\\Audio.exe\"",
+            "Enabling writes a quoted Run command");
+    using (var approved = Registry.CurrentUser.CreateSubKey(startupKey + @"\Approved"))
+        approved.SetValue("AudioFromWhatDevice", new byte[] { 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, RegistryValueKind.Binary);
+    Check(!registration.IsEnabled, "Turning the entry off in Task Manager unchecks the menu");
+    registration.Enable();
+    Check(registration.IsEnabled, "Checking it again overrides the Task Manager choice");
+    Check(!new StartupRegistration(@"D:\Other\Audio.exe", startupKey + @"\Run", startupKey + @"\Approved").IsEnabled,
+        "Another copy of the app does not show as enabled");
+    registration.Disable();
+    registration.Disable();
+    Check(!registration.IsEnabled, "Disabling removes the entry and can be repeated");
+}
+finally { Registry.CurrentUser.DeleteSubKeyTree(startupKey, throwOnMissingSubKey: false); }
+Console.WriteLine($"PASS: {count} activity, identity, single-tray selection, saved-label and start-on-boot checks");

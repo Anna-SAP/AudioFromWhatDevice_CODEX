@@ -53,6 +53,8 @@ internal static class Native
     [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropVariant value);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DestroyIcon(IntPtr icon);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr window);
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
