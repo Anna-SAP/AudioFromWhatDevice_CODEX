@@ -22,8 +22,14 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    outputs:
+      version: ${{ steps.exe.outputs.version }}
+      commit: ${{ steps.checkout.outputs.commit }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      digest: ${{ steps.upload.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@v7
+        id: checkout
         with:
           # The commit that landed on the base branch, whether merged, squashed or rebased.
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
@@ -44,11 +50,70 @@ jobs:
           $path = "artifacts/upload/AudioFromWhatDevice-$version-win-x64-$(git rev-parse --short=7 HEAD).exe"
           New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
           Copy-Item artifacts/publish/win-x64/AudioFromWhatDevice.exe $path
+          "version=$version" >> $env:GITHUB_OUTPUT
           "path=$path" >> $env:GITHUB_OUTPUT
 
       - uses: actions/upload-artifact@v7
+        id: upload
         with:
           path: ${{ steps.exe.outputs.path }}
           # Upload the .exe itself instead of a zip; the artifact takes the file name.
           archive: false
           if-no-files-found: error
+
+  release:
+    needs: build
+    # Fork PRs only get a read-only token; manual runs publish only from the default branch.
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: ${{ github.workflow }}-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: download
+
+      - name: Publish or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT: ${{ needs.build.outputs.commit }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          tag="v$VERSION"
+          asset="AudioFromWhatDevice-$VERSION-win-x64.exe"
+          # The download holds exactly one file; a stable per-version name lets rebuilds replace it.
+          mv download/* "$asset"
+          cat > notes.md <<EOF
+          Windows 11 x64 单文件版，已包含 .NET 运行时，下载后双击即可运行。
+          程序未签名，首次运行若出现 SmartScreen 提示，请选择“更多信息 → 仍要运行”。
+
+          - 提交：$COMMIT${PR_NUMBER:+（PR #$PR_NUMBER）}
+          - 构建：$RUN_URL
+          - SHA-256：\`${DIGEST#sha256:}\`
+          EOF
+          if gh release view "$tag" > /dev/null 2>&1; then
+            # Runs can finish out of order; never replace a build of a newer commit.
+            tagged=$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)
+            status=$(gh api "repos/$GH_REPO/compare/$COMMIT...$tagged" --jq .status)
+            if [ "$status" = ahead ]; then
+              echo "::notice::$tag already has a build of newer commit $tagged; leaving it unchanged."
+              exit 0
+            fi
+            # Same version rebuilt: move the tag so the release source matches the new EXE.
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$COMMIT" -F force=true > /dev/null
+            gh release upload "$tag" "$asset" --clobber
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" "$asset" --target "$COMMIT" --title "AudioFromWhatDevice v$VERSION" --notes-file notes.md
+          fi
