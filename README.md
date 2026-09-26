@@ -1,5 +1,9 @@
 # AudioFromWhatDevice
 
+## v0.6：右键菜单新增开机启动与关于
+
+右键菜单新增可勾选的“开机启动”，按当前用户注册，与“设置 › 应用 › 启动”及任务管理器中的启用状态保持一致；“关于”显示版本、构建提交和项目主页。
+
 ## v0.5：仅一个托盘图标，明确当前输出设备
 
 通知区域始终只有一个图标。播放时显示实际输出设备的简称；没有音频、暂停或静音时显示 Windows 当前默认输出设备的简称，不会变成无名称的灰色横线。蓝牙使用宝蓝色背景（#4169E1），内置扬声器使用绿色背景（#12704A）。其他已连接设备可在设备列表中查看，不再各自创建托盘图标。
@@ -12,11 +16,11 @@
 
 2026-09-26 验证：64 项检查通过，覆盖三设备启动、默认设备切换、非默认设备实际播放、静默、静音、零音量、断开重连、同时输出、同名设备与简称保存。真实单文件 EXE 在无音频和正在播放时均只显示一个绿色 RT 图标，对应系统默认的 Realtek 扬声器；MagicMic 未增加托盘图标。自包含运行时和退出验证通过。发布版本为 0.5.0。
 
-**可直接运行：双击项目根目录的 AudioFromWhatDevice.exe。** Windows 11 x64 单文件版（约 111 MiB），包含 .NET 运行时，无需安装 SDK 或 .NET。启动后在系统托盘中显示；左键查看设备，右键退出。
+**可直接运行：双击项目根目录的 AudioFromWhatDevice.exe。** Windows 11 x64 单文件版（约 111 MiB），包含 .NET 运行时，无需安装 SDK 或 .NET。启动后在系统托盘中显示；左键查看设备，右键菜单可设置开机启动、查看关于或退出。
 
 2026-09-26：已使用 .NET SDK 10.0.401 正式发布并通过独立 EXE 启动、真实音频读取、托盘退出及内嵌运行时验证。
 
-Windows 11 音频输出设备监测示例。启动后驻留系统托盘；左键打开实时设备列表，右键查看设备和退出。关闭列表窗口后仍继续监测。
+Windows 11 音频输出设备监测示例。启动后驻留系统托盘；左键打开实时设备列表，右键查看设备、设置开机启动、查看关于和退出。关闭列表窗口后仍继续监测。
 
 ## 技术栈建议
 
@@ -68,7 +72,8 @@ IMMDeviceEnumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
 | 文件 | 内容 |
 | --- | --- |
 | `src/AudioFromWhatDevice/Program.cs` | STA 入口、单实例、Application.Run、诊断参数 |
-| `src/AudioFromWhatDevice/TrayApplicationContext.cs` | 唯一文字图标、右键菜单、设备窗口与简称设置 |
+| `src/AudioFromWhatDevice/TrayApplicationContext.cs` | 唯一文字图标、右键菜单（开机启动、关于）、设备窗口与简称设置 |
+| `src/AudioFromWhatDevice/StartupRegistration.cs` | 开机启动：当前用户 Run 注册表项，识别任务管理器中的禁用状态 |
 | `src/AudioFromWhatDevice/TrayBadgeRenderer.cs` | DPI 感知的文字图标绘制、图标资源复用与释放 |
 | `src/AudioFromWhatDevice/TrayLabels.cs` | 自动简称、同名冲突消解、按设备 ID 保存设置、托盘显示状态 |
 | `src/AudioFromWhatDevice/AudioMonitor.cs` | MTA 采样、端点枚举、电平/静音读取、通知注册和恢复 |
@@ -113,7 +118,7 @@ dotnet run --project .\src\AudioFromWhatDevice\AudioFromWhatDevice.csproj
 
 运行后可以在任务栏隐藏图标区域找到托盘图标。可在 Windows 任务栏设置中让它始终显示。
 
-构建脚本先运行 64 项测试，再发布包含 .NET 运行时的单文件 EXE：
+构建脚本先运行 76 项测试，再发布包含 .NET 运行时的单文件 EXE：
 
 ```powershell
 .\build.ps1
@@ -132,7 +137,9 @@ dotnet publish .\src\AudioFromWhatDevice\AudioFromWhatDevice.csproj `
 
 目标电脑无需单独安装 .NET。首轮发布可能需要联网获取运行时包。为了减少文件体积，可执行 `./build.ps1 -FrameworkDependent`，此时目标电脑需要 .NET 10 Desktop Runtime。不要启用裁剪或 NativeAOT；本示例使用传统 COM 互操作和 WinForms。
 
-程序以普通用户权限运行。无需管理员、无需录音权限，不录制音频，也不修改设备路由、音量或静音。此版本未设置开机自启；需要时可把 EXE 的快捷方式放入 `shell:startup`。
+程序以普通用户权限运行。无需管理员、无需录音权限，不录制音频，也不修改设备路由、音量或静音。
+
+右键菜单勾选“开机启动”后，登录 Windows 时自动运行：程序在 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 写入 `AudioFromWhatDevice`，指向当前 EXE，无需管理员权限，可在“设置 › 应用 › 启动”或任务管理器中查看。在那里关闭后菜单同步显示未勾选，在菜单中重新勾选即恢复。移动或更换 EXE 后需重新勾选；取消勾选即删除该项。
 
 ## 准确性边界
 

@@ -1,13 +1,20 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security;
 using System.Text.Json;
 
 namespace AudioFromWhatDevice;
 
 internal sealed class TrayApplicationContext : ApplicationContext
 {
+    private const string ProjectUrl = "https://github.com/Anna-SAP/AudioFromWhatDevice_CODEX";
     private readonly AudioMonitor monitor = new();
     private readonly TrayLabels labels = new();
+    private readonly StartupRegistration? startup = StartupRegistration.ForCurrentProcess();
     private readonly ContextMenuStrip menu = new();
     private readonly TraySlot primary;
+    private TaskDialogPage? about;
 
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 200 };
     private readonly DeviceWindow window;
@@ -66,7 +73,49 @@ internal sealed class TrayApplicationContext : ApplicationContext
             menu.Items.Add(new ToolStripMenuItem("没有可用的输出端点") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("设置设备简称 / 查看电平…", null, (_, _) => ShowWindow());
+        // Read on every opening: Settings and Task Manager can change it while the app runs.
+        var startOnBoot = new ToolStripMenuItem("开机启动") { Checked = startup?.IsEnabled == true, Enabled = startup is not null };
+        startOnBoot.Click += (_, _) => SetStartOnBoot(!startOnBoot.Checked);
+        menu.Items.Add(startOnBoot);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("关于", null, (_, _) => ShowAbout());
         menu.Items.Add("退出", null, (_, _) => ExitThread());
+    }
+
+    private void SetStartOnBoot(bool enabled)
+    {
+        try
+        {
+            if (enabled) startup?.Enable();
+            else startup?.Disable();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        { MessageBox.Show(ex.Message, "开机启动未更改", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
+    private void ShowAbout()
+    {
+        // Another click brings the open dialog forward instead of stacking a second one.
+        if (about?.BoundDialog is { } open) { Native.SetForegroundWindow(open.Handle); return; }
+        var version = typeof(TrayApplicationContext).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+') ?? ["开发版本"];
+        var build = version is [_, { Length: >= 7 } commit, ..] ? $"提交 {commit[..7]} · " : "";
+        about = new TaskDialogPage
+        {
+            Caption = "关于 AudioFromWhatDevice",
+            Heading = $"AudioFromWhatDevice {version[0]}",
+            Text = "Windows 11 音频输出设备监测。通知区域只显示一个图标：播放时显示正在输出的设备，" +
+                "空闲时显示系统默认输出设备；蓝牙设备为宝蓝色，其他设备为绿色。\n\n" +
+                "左键打开设备列表，右键打开菜单。只读取电平和设备信息，不录制音频。",
+            Footnote = new TaskDialogFootnote($"{build}{RuntimeInformation.FrameworkDescription} · <a href=\"{ProjectUrl}\">项目主页</a>"),
+            Icon = TaskDialogIcon.Information,
+            EnableLinks = true,
+            AllowCancel = true,
+            Buttons = { TaskDialogButton.OK }
+        };
+        about.LinkClicked += (_, e) => Process.Start(new ProcessStartInfo(e.LinkHref) { UseShellExecute = true });
+        try { TaskDialog.ShowDialog(about, TaskDialogStartupLocation.CenterScreen); }
+        finally { about = null; }
     }
 
     private void ShowWindow()
