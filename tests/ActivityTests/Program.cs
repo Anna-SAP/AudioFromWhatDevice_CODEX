@@ -146,6 +146,34 @@ Check(empty.Text == "—" && empty.Kind == TrayBadgeKind.NoDevices, "No devices 
 Check(Display(connected with { Devices = [unplugged] }).Kind == TrayBadgeKind.NoDevices,
     "Disconnected-only snapshots cannot retain a device badge");
 
+Check(BluetoothDeviceDetector.BatteryPercent([81]) == 81 && BluetoothDeviceDetector.BatteryPercent([0]) == 0 &&
+    BluetoothDeviceDetector.BatteryPercent([100]) == 100, "Battery byte is a percentage");
+Check(BluetoothDeviceDetector.BatteryPercent([101]) is null && BluetoothDeviceDetector.BatteryPercent([255]) is null &&
+    BluetoothDeviceDetector.BatteryPercent([]) is null && BluetoothDeviceDetector.BatteryPercent(null) is null &&
+    BluetoothDeviceDetector.BatteryPercent([50, 0]) is null, "Missing or malformed battery data shows no level");
+var charged = connected with { Devices = [speaker, bluetooth with { Battery = 81 }, virtualDevice] };
+var chargedBadge = Display(charged);
+Check(chargedBadge.Id == bluetooth.Id && chargedBadge.Text == "HE" && chargedBadge.Battery == 81,
+    "Default Bluetooth headset badge keeps its name and carries its battery level");
+Check(chargedBadge.Description.StartsWith("电量 81% · "), "Tooltip leads with the level so truncation cannot hide it");
+Check(Display(connected).Battery is null && !Display(connected).Description.Contains("电量"),
+    "A headset without a reported level shows no gauge and no level");
+Check(Display(charged with { DefaultOutputId = speaker.Id }).Battery is null,
+    "The gauge belongs to the displayed device, not to another connected headset");
+Check(Display(charged with { DefaultOutputId = speaker.Id, Devices = [speaker, bluetooth with { Battery = 5 }, virtualDevice] }).Id == speaker.Id,
+    "A low battery never changes which device is shown");
+var unreadableCharged = Display(connected with { Devices = [speaker, unreadable with { Battery = 40 }, virtualDevice] });
+Check(unreadableCharged.Kind == TrayBadgeKind.Warning && unreadableCharged.Battery == 40,
+    "An unreadable meter does not hide a level the headset reported");
+Check(TrayPresentation.Build(charged, true, connectionLabels).Battery is null && Display(charged with { Error = "failed" }).Battery is null,
+    "Stale and failed status badges show no battery");
+Check(TrayPalette.BatteryHex(100) == "#FFFFFF" && TrayPalette.BatteryHex(21) == "#FFFFFF" &&
+    TrayPalette.BatteryHex(20) == "#FFC83D" && TrayPalette.BatteryHex(11) == "#FFC83D" &&
+    TrayPalette.BatteryHex(10) == "#FF6B6B" && TrayPalette.BatteryHex(0) == "#FF6B6B", "Battery colors change at 20% and 10%");
+// Reads this machine's real PnP tree; a machine without Bluetooth simply reports nothing.
+Check(BluetoothDeviceDetector.ReadBatteryLevels().Values.All(level => level is >= 0 and <= 100),
+    "Live battery levels are percentages");
+
 Check(StartupRegistration.Targets("\"C:\\Apps\\Audio.exe\"", @"C:\Apps\Audio.exe"), "Quoted Run command starts this copy");
 Check(StartupRegistration.Targets(@" c:\apps\AUDIO.EXE ", @"C:\Apps\Audio.exe"), "Unquoted Run command matches regardless of case");
 Check(StartupRegistration.Targets("\"C:\\Apps\\Audio.exe\" --tray", @"C:\Apps\Audio.exe"), "Arguments do not change the started copy");
@@ -177,4 +205,4 @@ try
     Check(!registration.IsEnabled, "Disabling removes the entry and can be repeated");
 }
 finally { Registry.CurrentUser.DeleteSubKeyTree(startupKey, throwOnMissingSubKey: false); }
-Console.WriteLine($"PASS: {count} activity, identity, single-tray selection, saved-label and start-on-boot checks");
+Console.WriteLine($"PASS: {count} activity, identity, single-tray selection, battery, saved-label and start-on-boot checks");

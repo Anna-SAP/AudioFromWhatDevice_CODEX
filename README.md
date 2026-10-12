@@ -1,5 +1,13 @@
 # AudioFromWhatDevice
 
+## v0.7：托盘图标直接显示蓝牙耳机电量
+
+托盘图标显示的是蓝牙耳机时（正在输出，或空闲时为系统默认设备），图标底部会出现一节电池，填充长度即剩余电量；简称保持原有字号。电池右端的正极凸头用来与音量/电平条区分。电量 20% 及以下时电池变为琥珀色，10% 及以下变为红色。悬浮提示以“电量 79%”开头，避免被系统截断；右键菜单和设备列表新增的“电量”列显示具体数值。
+
+电量与 Windows“设置 › 蓝牙和其他设备”中显示的是同一份数据：耳机通过免提协议（HFP）或低功耗蓝牙电池服务上报，Windows 将其记录在设备节点的电池属性 `{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2` 上。程序按音频端点的 Container ID 找到同一台物理设备，随每 3 秒的设备重扫刷新，无需管理员权限，也不与耳机直接通信。耳机未上报电量（Windows 设置中也不显示）时不绘制电池，设备列表显示“未上报”；有线和内置设备不显示电池。
+
+2026-10-12 验证：87 项检查通过；本机 Sony WF-1000XM5 实时读出 79%，与 PnP 属性一致；托盘徽标为宝蓝色 XM5 加电池，悬浮提示为“XM5 · 电量 79% · Headphones (WF-1000XM5) · 正在输出 · 系统默认”。本机 205 个设备节点下，读取一次电量约 3.7 ms。发布版本为 0.7.0。
+
 ## v0.6：右键菜单新增开机启动与关于
 
 右键菜单新增可勾选的“开机启动”，按当前用户注册，与“设置 › 应用 › 启动”及任务管理器中的启用状态保持一致；“关于”显示版本、构建提交和项目主页。
@@ -56,6 +64,8 @@ IMMDeviceEnumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
 
 设备通知通过 `IMMNotificationClient` 接收，回调只设置刷新标志，不执行 COM 查询或阻塞操作。查询、释放、重建设备对象均在独立 MTA 线程执行；每 3 秒额外重新枚举，作为遗漏通知和暂时读取异常的恢复手段。音频服务错误会显示异常并重试。
 
+蓝牙电量不在音频端点上，而在同一设备的另一个服务节点上（经典蓝牙耳机为免提服务 `BTHENUM\{0000111E-…}`，低功耗蓝牙设备为 `BTHLE\DEV_…`），它也不是端点的上级节点。因此每次重扫时列出当前存在的 `BTH*` 设备节点，读取电池属性和 Container ID，再按蓝牙端点的 Container ID 匹配；同一设备有多个节点上报时取最低值。电量变化不会触发端点通知，依靠这一定期重扫更新。只有存在蓝牙输出端点时才执行这项读取。
+
 ## 多蓝牙设备如何区分
 
 - **内部以完整 Endpoint ID 为键**，不以蓝牙名称为键；两台同名耳机不会合并。ID 按不透明字符串使用，不解析其中的内容。
@@ -74,10 +84,10 @@ IMMDeviceEnumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
 | `src/AudioFromWhatDevice/Program.cs` | STA 入口、单实例、Application.Run、诊断参数 |
 | `src/AudioFromWhatDevice/TrayApplicationContext.cs` | 唯一文字图标、右键菜单（开机启动、关于）、设备窗口与简称设置 |
 | `src/AudioFromWhatDevice/StartupRegistration.cs` | 开机启动：当前用户 Run 注册表项，识别任务管理器中的禁用状态 |
-| `src/AudioFromWhatDevice/TrayBadgeRenderer.cs` | DPI 感知的文字图标绘制、图标资源复用与释放 |
+| `src/AudioFromWhatDevice/TrayBadgeRenderer.cs` | DPI 感知的文字图标与底部电量电池绘制、图标资源复用与释放 |
 | `src/AudioFromWhatDevice/TrayLabels.cs` | 自动简称、同名冲突消解、按设备 ID 保存设置、托盘显示状态 |
 | `src/AudioFromWhatDevice/AudioMonitor.cs` | MTA 采样、端点枚举、电平/静音读取、通知注册和恢复 |
-| `src/AudioFromWhatDevice/BluetoothDeviceDetector.cs` | 蓝牙枚举器识别与 PnP 父节点查询 |
+| `src/AudioFromWhatDevice/BluetoothDeviceDetector.cs` | 蓝牙枚举器识别、PnP 父节点查询、按 Container ID 读取电量 |
 | `src/AudioFromWhatDevice/CoreAudioInterop.cs` | 所需原生 COM 接口、GUID、PROPVARIANT 生命周期 |
 | `src/AudioFromWhatDevice/ActivityState.cs` | 阈值、保持、静音状态、按端点区分的快照 |
 
@@ -118,7 +128,7 @@ dotnet run --project .\src\AudioFromWhatDevice\AudioFromWhatDevice.csproj
 
 运行后可以在任务栏隐藏图标区域找到托盘图标。可在 Windows 任务栏设置中让它始终显示。
 
-构建脚本先运行 76 项测试，再发布包含 .NET 运行时的单文件 EXE：
+构建脚本先运行 87 项测试，再发布包含 .NET 运行时的单文件 EXE：
 
 ```powershell
 .\build.ps1
@@ -148,6 +158,7 @@ dotnet publish .\src\AudioFromWhatDevice\AudioFromWhatDevice.csproj `
 3. **独占模式存在限制。** 有硬件电平表时 Core Audio 可在共享/独占模式读取；只有软件电平表时独占播放会返回零。界面显示硬件/软件支持，“未检测到信号”不等于“没有播放”。ASIO 等绕过 Windows 音频引擎的路径不属于本示例保证覆盖范围。
 4. 电平值反映上一设备周期，50 ms 轮询不保证捕捉每个极短提示音；600 ms 保持只能防止已捕获信号闪烁，不能补回漏采样。如要分析所有共享模式音频帧，可扩展为逐端点 WASAPI loopback 捕获并计算能量，但会增加采集成本，仍无法绕开所有独占/硬件限制。
 5. 本示例不把 `AudioSessionStateActive` 当作发声证据；一个启动但传输静音样本的会话也可能处于 Active。
+6. **电量由耳机自行上报。** 程序显示的是 Windows 当前记录的值，与 Windows 设置一致；精度、更新频率以及真无线耳机报告哪一侧或哪个汇总值，取决于耳机型号和所用协议。程序最多每 3 秒读取一次。耳机不支持上报或 Windows 尚未收到上报时不显示电池，不会估算电量。
 
 依据：[IAudioMeterInformation](https://learn.microsoft.com/en-us/windows/win32/api/endpointvolume/nn-endpointvolume-iaudiometerinformation)、[GetPeakValue](https://learn.microsoft.com/en-us/windows/win32/api/endpointvolume/nf-endpointvolume-iaudiometerinformation-getpeakvalue)、[通知回调约束](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nn-mmdeviceapi-immnotificationclient)。
 
@@ -170,7 +181,7 @@ dotnet .\artifacts\local-validation\AudioFromWhatDevice.dll
 
 可复现的 SDK 缺失环境验证脚本为 `scripts/verify-with-local-compiler.ps1`；它依赖本机 Roslyn 和指定版本运行时，仅作为源码/API 验证手段。正式构建请使用上面的 SDK 步骤。
 
-进一步实机验收：连接蓝牙设备 A/B，在 Windows 音量混合器中将两个持续播放的应用分别路由到 A/B；确认两者都显示输出。暂停一个、静音另一个，再断开和重连，分别核对保持到期、立即静音、端点移除与恢复。另用同名耳机确认完整 ID 不同；确认通知区域始终只有一个图标；播放优先，暂停/静音后显示默认设备。切换系统默认设备时，空闲图标相应切换名称和蓝色/绿色；断开后回退到可用设备。
+进一步实机验收：连接蓝牙设备 A/B，在 Windows 音量混合器中将两个持续播放的应用分别路由到 A/B；确认两者都显示输出。暂停一个、静音另一个，再断开和重连，分别核对保持到期、立即静音、端点移除与恢复。另用同名耳机确认完整 ID 不同；确认通知区域始终只有一个图标；播放优先，暂停/静音后显示默认设备。切换系统默认设备时，空闲图标相应切换名称和蓝色/绿色；断开后回退到可用设备。连接会上报电量的蓝牙耳机，确认图标底部出现电池，悬浮提示中的百分比与 Windows 设置一致；切换到扬声器后电池消失。
 
 可用 scripts/verify-published.ps1 -RequireIdleSelection 验证无播放时只有一个默认设备文字图标；验证结果保存默认设备 ID、被选设备、图标数量、名称、颜色及 EXE 哈希。
 

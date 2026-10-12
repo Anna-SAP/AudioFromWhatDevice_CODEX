@@ -117,10 +117,19 @@ internal static class TrayPalette
         TrayBadgeKind.Warning => "#A24B00",
         _ => "#555B64"
     };
+
+    // As on the Windows battery icon: plain while charged, amber when low, red when nearly empty.
+    public static string BatteryHex(int level) => level switch
+    {
+        <= 10 => "#FF6B6B",
+        <= 20 => "#FFC83D",
+        _ => "#FFFFFF"
+    };
 }
 internal sealed record TrayBadge(string Id, string Text, string Description, TrayBadgeKind Kind)
 {
     public string BackgroundColor => TrayPalette.BackgroundHex(Kind);
+    public int? Battery { get; init; }
 }
 
 internal static class TrayPresentation
@@ -150,6 +159,9 @@ internal static class TrayPresentation
         var concurrent = playing.Length > 1 ? $" · 另有 {playing.Length - 1} 台输出" : "";
         var kind = device.Error is not null || device.Activity == Activity.Unavailable ? TrayBadgeKind.Warning :
             device.IsBluetooth ? TrayBadgeKind.Bluetooth : TrayBadgeKind.NonBluetooth;
-        return new(device.Id, labels[device.Id], $"{device.Name} · {device.Status}{role}{concurrent}", kind);
+        // Lead with the level: the shell cuts long tooltips, and the icon shows it only as a gauge.
+        var battery = device.Battery is int level ? $"电量 {level}% · " : "";
+        return new(device.Id, labels[device.Id], $"{battery}{device.Name} · {device.Status}{role}{concurrent}", kind)
+            { Battery = device.Battery };
     }
 }

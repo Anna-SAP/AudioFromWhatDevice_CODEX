@@ -46,6 +46,7 @@ internal sealed class AudioMonitor : IDisposable
         var registered = false;
         long nextRefresh = 0;
         string? defaultOutputId = null;
+        IReadOnlyDictionary<Guid, int> batteries = new Dictionary<Guid, int>();
         try
         {
             enumerator = Native.CreateEnumerator();
@@ -60,9 +61,12 @@ internal sealed class AudioMonitor : IDisposable
                     foreach (var endpoint in endpoints) endpoint.Dispose();
                     endpoints = replacement;
                     defaultOutputId = GetDefaultOutputId(enumerator);
+                    // Battery changes raise no endpoint notification, so the periodic refresh picks them up.
+                    batteries = endpoints.Any(endpoint => endpoint.IsBluetooth)
+                        ? BluetoothDeviceDetector.ReadBatteryLevels() : new Dictionary<Guid, int>();
                     nextRefresh = now + 3000; // Also recovers missed driver notifications.
                 }
-                Publish(endpoints.Select(endpoint => endpoint.Sample(now)).ToArray(), defaultOutputId: defaultOutputId);
+                Publish(endpoints.Select(endpoint => endpoint.Sample(now, batteries)).ToArray(), defaultOutputId: defaultOutputId);
             } while (!stop.WaitOne(50));
         }
         finally
@@ -140,9 +144,10 @@ internal sealed class AudioMonitor : IDisposable
         private bool hardwareMeter;
         public string Id { get; }
         public ActivityState State { get; }
+        public bool IsBluetooth { get; }
         private readonly string name;
         private readonly string? containerId;
-        private readonly bool isBluetooth;
+        private readonly Guid? container;
 
         public Endpoint(IMMDevice device, string id, ActivityState state)
         {
@@ -151,8 +156,9 @@ internal sealed class AudioMonitor : IDisposable
             State = state;
             name = SafeProperty(Native.FriendlyName) ?? "未命名输出设备";
             containerId = SafeProperty(Native.ContainerId);
+            container = Guid.TryParse(containerId, out var parsed) ? parsed : null;
             // Endpoint stores expose the adapter enumerator even when InstanceId is absent.
-            isBluetooth = BluetoothDeviceDetector.IsBluetoothEnumerator(SafeProperty(Native.EnumeratorName)) ||
+            IsBluetooth = BluetoothDeviceDetector.IsBluetoothEnumerator(SafeProperty(Native.EnumeratorName)) ||
                 BluetoothDeviceDetector.IsBluetoothDevice(SafeProperty(Native.InstanceId));
             try
             {
@@ -170,26 +176,29 @@ internal sealed class AudioMonitor : IDisposable
             catch (COMException) { return null; }
         }
 
-        public EndpointSnapshot Sample(long now)
+        public EndpointSnapshot Sample(long now, IReadOnlyDictionary<Guid, int> batteries)
         {
+            // The device reports one level; every endpoint it exposes shares its Container ID.
+            int? battery = IsBluetooth && container is Guid key && batteries.TryGetValue(key, out var percent) ? percent : null;
             try
             {
                 Native.Check(device.GetState(out var state));
-                if (state != 1) return Unavailable("设备已断开或不可用，正在刷新。", isAvailable: false);
-                if (initializationError is not null) return Unavailable(initializationError);
+                if (state != 1) return Unavailable("设备已断开或不可用，正在刷新。", null, isAvailable: false);
+                if (initializationError is not null) return Unavailable(initializationError, battery);
                 Native.Check(meter!.GetPeakValue(out var peak));
                 Native.Check(volume!.GetMute(out var muted));
                 Native.Check(volume.GetMasterVolumeLevelScalar(out var level));
                 return new(Id, name, containerId, peak, level, muted, hardwareMeter,
-                    State.Update(peak, muted, level, now), null) { IsBluetooth = isBluetooth };
+                    State.Update(peak, muted, level, now), null) { IsBluetooth = IsBluetooth, Battery = battery };
             }
-            catch (Exception ex) { return Unavailable(ex.Message); }
+            catch (Exception ex) { return Unavailable(ex.Message, battery); }
         }
 
-        private EndpointSnapshot Unavailable(string error, bool isAvailable = true)
+        private EndpointSnapshot Unavailable(string error, int? battery, bool isAvailable = true)
         {
             State.Update(0, true, 0, Environment.TickCount64); // Clear stale activity immediately.
-            return new(Id, name, containerId, 0, 0, false, hardwareMeter, Activity.Unavailable, error) { IsBluetooth = isBluetooth, IsAvailable = isAvailable };
+            return new(Id, name, containerId, 0, 0, false, hardwareMeter, Activity.Unavailable, error)
+                { IsBluetooth = IsBluetooth, IsAvailable = isAvailable, Battery = battery };
         }
 
         public void Dispose()
