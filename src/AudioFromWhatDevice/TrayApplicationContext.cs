@@ -61,7 +61,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             menu.Items.Add(new ToolStripMenuItem(IsStale ? "数据已过期" : snapshot.Error) { Enabled = false });
         foreach (var device in snapshot.Devices.OrderBy(d => d.Name))
         {
-            var item = new ToolStripMenuItem($"[{names[device.Id]}] {device.Name} · {device.Status}" + (device.Id == snapshot.DefaultOutputId ? " · 系统默认" : ""))
+            var battery = device.Battery is int level ? $" · 电量 {level}%" : "";
+            var item = new ToolStripMenuItem($"[{names[device.Id]}] {device.Name} · {device.Status}{battery}" + (device.Id == snapshot.DefaultOutputId ? " · 系统默认" : ""))
             {
                 Checked = !IsStale && device.IsAvailable && device.Activity is Activity.Signal or Activity.Recent,
                 ToolTipText = device.Error ?? device.Id
@@ -105,7 +106,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Caption = "关于 AudioFromWhatDevice",
             Heading = $"AudioFromWhatDevice {version[0]}",
             Text = "Windows 11 音频输出设备监测。通知区域只显示一个图标：播放时显示正在输出的设备，" +
-                "空闲时显示系统默认输出设备；蓝牙设备为宝蓝色，其他设备为绿色。\n\n" +
+                "空闲时显示系统默认输出设备；蓝牙设备为宝蓝色，其他设备为绿色。" +
+                "蓝牙设备上报电量时，图标底部的电池显示剩余电量，20% 及以下变为琥珀色，10% 及以下变为红色。\n\n" +
                 "左键打开设备列表，右键打开菜单。只读取电平和设备信息，不录制音频。",
             Footnote = new TaskDialogFootnote($"{build}{RuntimeInformation.FrameworkDescription} · <a href=\"{ProjectUrl}\">项目主页</a>"),
             Icon = TaskDialogIcon.Information,
@@ -200,13 +202,14 @@ internal sealed class DeviceWindow : Form
         devices.Columns.Add("输出设备 / 端点标识", 310);
         devices.Columns.Add("托盘文字", 85);
         devices.Columns.Add("状态", 160);
+        devices.Columns.Add("电量", 70);
         devices.Columns.Add("电平 dBFS", 90);
         devices.Columns.Add("系统音量", 85);
         devices.Columns.Add("电平表", 100);
         var note = new Label
         {
             Dock = DockStyle.Bottom, Height = 52, Padding = new Padding(10, 5, 10, 5),
-            Text = "只显示一个图标：播放时显示输出设备，空闲时显示默认设备。蓝牙宝蓝色，扬声器绿色。\n" +
+            Text = "只显示一个图标：播放时显示输出设备，空闲时显示默认设备。蓝牙宝蓝色，扬声器绿色；图标底部电池为蓝牙设备电量。\n" +
                 "50 ms 采样，600 ms 保持。软件电平表无法确认独占播放或耳机本体是否发声。"
         };
         var aliasBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(10, 4, 0, 0) };
@@ -250,17 +253,18 @@ internal sealed class DeviceWindow : Form
             {
                 if (!rows.TryGetValue(device.Id, out var row))
                 {
-                    row = new ListViewItem([device.Label, "", "", "", "", ""]) { Tag = device.Id };
+                    row = new ListViewItem([device.Label, "", "", "", "", "", ""]) { Tag = device.Id };
                     rows.Add(device.Id, row);
                     devices.Items.Add(row);
                 }
                 row.Text = (device.Id == value.DefaultOutputId ? "默认 · " : "") + device.Label;
                 row.SubItems[1].Text = names[device.Id];
                 row.SubItems[2].Text = stale ? "数据已过期" : device.Status;
-                row.SubItems[3].Text = device.Error is not null ? "—" : device.Peak > 0
+                row.SubItems[3].Text = device.Battery is int battery ? $"{battery}%" : device.IsBluetooth ? "未上报" : "—";
+                row.SubItems[4].Text = device.Error is not null ? "—" : device.Peak > 0
                     ? $"{20 * Math.Log10(device.Peak):F1}" : "−∞";
-                row.SubItems[4].Text = device.Error is null ? $"{device.Volume:P0}" : "—";
-                row.SubItems[5].Text = device.HardwareMeter ? "硬件" : "软件";
+                row.SubItems[5].Text = device.Error is null ? $"{device.Volume:P0}" : "—";
+                row.SubItems[6].Text = device.HardwareMeter ? "硬件" : "软件";
                 row.ForeColor = stale || device.Error is not null ? Color.DarkOrange :
                     device.Activity is Activity.Signal or Activity.Recent ? (device.IsBluetooth ? Color.RoyalBlue : Color.SeaGreen) : SystemColors.GrayText;
                 row.ToolTipText = device.Error ?? device.Id;

@@ -32,6 +32,8 @@ internal sealed record EndpointSnapshot(string Id, string Name, string? Containe
     public bool IsBluetooth { get; init; }
     // DEVICE_STATE_ACTIVE means connected and enabled, independent of playback.
     public bool IsAvailable { get; init; } = true;
+    // Percentage reported by the Bluetooth device itself; null when Windows has none for it.
+    public int? Battery { get; init; }
 
     // Cosmetic hash only; the full opaque endpoint ID is always the identity key.
     public string ShortId => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(

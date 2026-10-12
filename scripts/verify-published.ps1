@@ -42,6 +42,7 @@ if ($available.Count -gt 0) {
     if ($badges[0].BackgroundColor -ne $expectedColor -or -not $badges[0].Description.Contains($selectedDevice.Name)) {
         throw 'Selected device name or transport color is incorrect.'
     }
+    if ($badges[0].Battery -ne $selectedDevice.Battery) { throw 'Tray battery gauge does not match the selected device.' }
     $candidates = if ($playing.Count -gt 0) { $playing } else { $available }
     if ($selectedDevice.Id -notin $candidates.Id) { throw 'Single tray icon did not prioritize real audio output.' }
     if ($trayResult.DefaultOutputId -in $candidates.Id -and $selectedDevice.Id -ne $trayResult.DefaultOutputId) {
@@ -82,6 +83,7 @@ foreach ($marker in @('Detected Single-File app bundle', 'Using internal fxr', '
     IdleDefaultConfirmed = $playing.Count -eq 0 -and $null -ne $selectedDevice -and $selectedDevice.Id -eq $trayResult.DefaultOutputId
     TrayBadgeTexts = @($badges | ForEach-Object Text)
     TrayBadgeColors = @($badges | ForEach-Object BackgroundColor)
+    TrayBadgeBattery = @($badges | ForEach-Object Battery)
     BluetoothHardwareChecked = [bool]$ExpectedBluetoothEndpointId
     SpeakerHardwareChecked = [bool]$ExpectedSpeakerEndpointId
     TrayPreview = $trayFile + '.png'
